@@ -2,4 +2,4 @@
 
 Implementation of Level 4 Teleport backend challenge 2 as described [here](https://github.com/gravitational/careers/blob/main/challenges/systems/challenge-2.md)
 
-See [RFD](rfd.md) for more details.
+See [RFD](rfd.md) for design details.
