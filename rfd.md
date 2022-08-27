@@ -27,15 +27,15 @@ package lbproxy
 
 // ApplicationConfig initializes an Application instance
 type ApplicationConfig struct {
-	name      string            // App name for diagnostic purposes
-	upstreams []UpstreamServer  // Upstream servers to load-balance
+	Name      string            // App name for diagnostic purposes
+	Upstreams []UpstreamServer  // Upstream servers to load-balance
 }
 
 // UpstreamServer describes a server being load-balanced
 // Note: using a struct allows non-breaking extensions to add other properties, like certificates or relative 
 // upstream weights for a more advanced load-balancing algorithm.
 type UpstreamServer struct {
-	address string
+	Address string
 }
 ```
 
@@ -45,12 +45,36 @@ and then seeing if the response indicates the rate limit has been exceeded.
 It is crucial that the `RateLimitManager` events are safe to dispatch across threads, as multiple connection in parallel will
 update rate limit statistics and check if the rate has been exceeded.
 
-- The `RateLimitManager` can provide client-level, app-level, global, or other combinations of rate-limiting, depending on how many instances the server creates, and how they are passed to `Application` when a connection is opened.
-- For this project, we'll create a simple implementation that tracks the number of connections open over a time period, 
+- The `RateLimitManager` can provide client-level, app-level, global, or other combinations of rate-limiting, 
+depending on how many instances the server creates, and how they are passed to `Application` when a connection is opened.
+- For this project, we'll create a simple implementation that tracks the number of connections open over a fixed time period, 
 ensuring they do not exceed a max concurrent open cap (important to avoid slow-rate attacks), 
 and that no more than a certain amount are opened over a time period.
-- Possible extensions include enforcing bandwidth usage, connection duration, and throttling VS simple connection rejection.
-We could also nest instances, which would allows us to stack multiple policies transparently from the proxy code itself. 
+  - Possible extensions include enforcing bandwidth usage, connection duration, and throttling VS simple connection rejection.
+  We could also nest instances, which would allows us to stack multiple policies transparently from the proxy code itself. 
+
+The rate-limiting process will use a sliding-window approach, as follows:
+
+1. The library client is responsible with authenticating users and creating the `RateLimitManager` instance at the scope
+they required; for example one instance per client would rate-limit at a client level, one per client and application would
+rate-limit for that client, but the access is tracked separately for each application, etc.
+2. Before connecting to an upstream, the proxy library will call `RateLimitManager.AddConnection`. The manager will
+maintain two data structures:
+   1. A count of all currently open connections
+   2. A list if timestamps (epoch seconds) that represents times at which a connection was created. 
+   Since this will be atomically added to using current time, the numbers will always be sorted.
+3. First, the manager will see if the current open count matches or exceeds a set limit and return false; 
+in this case, the proxy will reject the connection and close it. 
+4. If the previous step passes, the manager will check for connection rate as follows:
+   1. Trim the list of timestamps by traversing it from the beginning until and removing everything outside the sliding window
+      (e.g. everything that was more than 60 seconds less than current timestamp), stopping when the window is reached.
+   2. Check the if the number of items left in the list meets or exceeds the rate for the window, if so return false;
+   otherwise, add current time to list, increase count of opened connections, and return true.
+5. If the method returns true, the connection is established. When the connection is terminated, 
+the proxy library will call `RateLimitManager.ReleaseConnection`, which will simply decrease the currently open connection count.
+Note that in this setup a client connection that fails to connect to a server is still counted in the opening rate
+and in the max open count while it's been established; this protects our system from abuse in case upstream 
+servers are slow or unable to respond to an aggressive number of requests.
 
 Once the `Application` instance is created, it will be ready to accept client connections. 
 To do so, the client will call `submitConnection` of the Application with:
@@ -59,14 +83,17 @@ To do so, the client will call `submitConnection` of the Application with:
 - An instance of `RateLimitManager`, which provides rate-limiting for scope as controlled by caller.
 
 The `Application` will maintain a concurrent map from the upstream address to the number of active connections for the address.
-When a connection is requested, the proxy library will inform `RateLimitManager` of the event, and if the response allows a connection, 
+When a connection is requested, the proxy library will inform `RateLimitManager` of the event as described above, and if the response allows a connection, 
 it will iterate through the upstreams looking for the one lowest number of open connections 
 (keeping the upstreams ordered, like with a treemap, would be overkill for this implementation), increase the connection count, then attempt to dial the upstream. 
 If dial fails (or when the connection is closed), the number of open connections for the upstream will be lowered 
 (this optimistic increment behavior lowers the number of operations against the map, since connection failures are considered the exception).
 
-- The proxy uses simple buffering to transfer data to and from the upstreams; in a more mature system, this would be improved by
-creating a faster and more controllable buffer (like a growable ring buffer); this is important as we want to limit memory
+- The proxy uses go `io.Copy` to transfer data to and from the upstreams. Two goroutines will be responsible for copying
+in each direction (client->upstream and upstream->client) until both source EOFs are reached; if an error occurs in either copy, 
+a signal channel between the two will be used to interrupt the other goroutine. Once both goroutines terminate, the connection will be
+marked as released in the rate-limiter.
+  - In a more mature system, this would be improved by creating a faster and more controllable buffer (like a growable ring buffer); this is important as we want to limit memory
 usage and reduce GC pauses, especially if the client, proxy, and upstream servers bandwidths are very different.
 
 The Application itself will manage connection errors and take care of cleanly closing the connections to server and client.
@@ -87,10 +114,34 @@ The server has the following primary responsibilities:
 
 The server can be configured to proxy an arbitrary number of applications, each with an arbitrary number of upstream servers.
 Each application will have a name (used to manage permissions), a port that the server will open to accept client connections, 
-and a list of upstream servers, as defined in the `lbproxy` API.
+and a list of upstream servers, as defined in the `lbproxy` API; it could be represented as follows in YAML 
+(in our simple implementation it would be static data):
 
-The server will also be configured with a list of permitted client ids (resolved via our Authentication system described below) 
-and which Application names they can access.
+```yaml
+apps:
+  - id: App1
+    upstreams:
+      - address: "app1.com:2222"
+      - address: "app2.com:3333"
+  - id: App2
+    upstreams:
+      - address: "app2.com:2222"
+      - address: "app3.com:3333"
+```
+
+The server will also be configured with a list of permitted client ids and which Application names they can access
+(accessing an app accesses all its upstreams equally). For more details on authorization and authentication, see the Security section.
+
+```yaml
+auth:
+  - id: Client1.com
+    apps:
+    - App1
+    - App2
+  - id: Client2.net
+    apps:
+    - App1
+```
 
 After reading the configuration, the server attempts to open each configured application port; assuming this succeeds, the proxy is online.
 When a connection is accepted, the server will perform authentication and authorization; if they succeed, the application
@@ -119,10 +170,14 @@ The system will provide a minimalist but robust set of security features, based 
 
 #### Transport security
 
-The connection between server and client will be secured by mTLS. 
-For this application, we assume there is a single CA issuing client certificates, with a manual or automated process to issue them, 
-e.g. as part of system provisioning or licensing process. In this implementation, for simplicity, 
-we will generate and self-sign the certificates and load them from the local file system.
+The connection between server and client will be secured by mTLS 1.3 using ECDSA-256, as recommended in the
+[OpenSSH Cookbook](https://en.wikibooks.org/wiki/OpenSSH/Cookbook/Certificate-based_Authentication). 
+For this application, we assume a single CA will be issuing client certificates for both server and clients
+(in production, we would split the server and client CAs, as well as rotate them).
+For simplicity here, production certificate management being very complex, we will generate a CA Root certificate locally using 
+`ssh-keygen` and similarly issuing server and client certificates, which we'll then load them from the local file system.
+We'll include some test certificates in the `/certs` folders, as well as instructions on how to re-create and test them
+using `openssl` in the [README file](/certs/README.md) within.
 
 - Additionally, for each upstream, we could provide a client certificate to encrypt the traffic between the proxy and the upstream
 (which is the server in this case), and also to ensure only authorized proxies can connect directly tp upstream servers. 
@@ -130,11 +185,12 @@ This may be omitted if this layer of security doesn't make sense for the applica
 
 #### Authentication
 
-When a client connects with mTLS, we will inspect the name in the X509 certificate. Since we are assuming a since CA for the system, 
-we can use the serial number as a unique client identifier. Because we also want to support authorization, 
-this identifier is then cross-referenced to a user list, which is statically loaded for this implementation, 
-but would be in a secure store linked to our CA/client-cert issuing system in a production implementation. 
-If the serial number matches a known id, the client is authenticated.
+When a client connects with mTLS, we will retrieve the `subject` from the X509 certificate.
+Since we are assuming a since CA for the system, we will find our cert by locating our mTLS CA issuer `CommonName` 
+in the certificate chain, then will extract the `CommonName` of the subject to use as the unique client identifier. 
+Because we also want to support authorization, this identifier is then cross-referenced to a user list, 
+which is statically loaded for this implementation, but would be in a secure store linked to our CA/client-cert 
+issuing system in a production implementation. If the client identifier matches a known one, the client is authenticated.
 
 #### Authorization
 
@@ -144,4 +200,4 @@ For this simple application, we will simply have a list of the allowed applicati
 
 - A simple extension to this system can include configurable rate limits for each application the client has access to, 
 which can be tailored to usage, application type (e.g. sockets VS HTTP connections), or licensing agreements.
-- Alternatively we could have bundled claims in the X509 certificate, but that makes system maintainability and certificate management more complex.
+- Alternatively we could have added scopes and claims in the X509 certificate, but for this simple application a static lookup will be sufficient.

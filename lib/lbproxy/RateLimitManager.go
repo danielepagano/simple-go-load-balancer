@@ -8,11 +8,12 @@ package lbproxy
 // in-between states, for example data transfers may be delayed to maintain a
 // goal data rate across the entire scope (e.g. bandwidth limit across all connections of one client)
 type RateLimitManager interface {
-	addConnection() bool
-	releaseConnection()
+	// AddConnection checks that the quantity and timing of a connection request matches the policy for this
+	// scope, and returns true if so, and false otherwise
+	AddConnection() bool
 
-	// Extension example: interface to track bandwidth usage and rate-limit it
-	dataTransfer(bytesTransferred int64, isResponse bool) bool
+	// ReleaseConnection decreases the count of active connections to support max open connections capping
+	ReleaseConnection()
 }
 
 // TODO: implement interface
