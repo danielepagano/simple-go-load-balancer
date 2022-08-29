@@ -39,9 +39,7 @@ type UpstreamServer struct {
 }
 ```
 
-#### RateLimitManager
-
-To support rate-limiting, clients create a `RateLimitManager` instance, which can track rate-limiting statistics, and signal when a rate has been exceeded. 
+To support rate-limiting, clients can create a `RateLimitManager` instance, which can track various statistics, and signal when a rate has been exceeded. 
 This is accomplished by sending the instance an event (connection opened, data transferred, etc.) 
 and then seeing if the response indicates the rate limit has been exceeded. 
 It is crucial that the `RateLimitManager` events are safe to dispatch across threads, as multiple connection in parallel will
@@ -78,14 +76,11 @@ Note that in this setup a client connection that fails to connect to a server is
 and in the max open count while it's been established; this protects our system from abuse in case upstream 
 servers are slow or unable to respond to an aggressive number of requests.
 
-#### Application
-
-The `Application` performs load-balancing between clients and servers. Once created, it will be ready to accept client connections. 
+Once the `Application` instance is created, it will be ready to accept client connections. 
 To do so, the client will call `submitConnection` of the Application with:
 
 - Incoming client connection, as reference to a `net.TCPConn` instance.
 - An instance of `RateLimitManager`, which provides rate-limiting for scope as controlled by caller.
-- A channel used to signal immediate termination (to exit the process gracefully)
 
 The `Application` will maintain a concurrent map from the upstream address to the number of active connections for the address.
 When a connection is requested, the proxy library will inform `RateLimitManager` of the event as described above, and if the response allows a connection, 
@@ -95,14 +90,13 @@ If dial fails (or when the connection is closed), the number of open connections
 (this optimistic increment behavior lowers the number of operations against the map, since connection failures are considered the exception).
 
 - The proxy uses go `io.Copy` to transfer data to and from the upstreams. Two goroutines will be responsible for copying
-in each direction (`client->upstream` and `upstream->client`) until both source EOFs are reached; if an error occurs in either copy, 
+in each direction (client->upstream and upstream->client) until both source EOFs are reached; if an error occurs in either copy, 
 a signal channel between the two will be used to interrupt the other goroutine. Once both goroutines terminate, the connection will be
 marked as released in the rate-limiter.
   - In a more mature system, this would be improved by creating a faster and more controllable buffer (like a growable ring buffer); this is important as we want to limit memory
 usage and reduce GC pauses, especially if the client, proxy, and upstream servers bandwidths are very different.
 
 The Application itself will manage connection errors and take care of cleanly closing the connections to server and client.
-In this simple version, a connection error (for example if an upstream was not available) would simply close the other connection.
 
 - A more robust proxy would also support tracking health on each upstream: if a server does not respond to a request, 
 it would be marked unhealthy and quarantined (removed from load-balancing list).
@@ -126,12 +120,10 @@ and a list of upstream servers, as defined in the `lbproxy` API; it could be rep
 ```yaml
 apps:
   - id: App1
-    proxyPort: 9001
     upstreams:
       - address: "app1.com:2222"
       - address: "app2.com:3333"
   - id: App2
-    proxyPort: 9002
     upstreams:
       - address: "app2.com:2222"
       - address: "app3.com:3333"
@@ -178,17 +170,18 @@ The system will provide a minimalist but robust set of security features, based 
 
 #### Transport security
 
-The connection between server and client will be secured by mTLS 1.3 using RSA-2048. 
+The connection between server and client will be secured by mTLS 1.3 using ECDSA-256, as recommended in the
+[OpenSSH Cookbook](https://en.wikibooks.org/wiki/OpenSSH/Cookbook/Certificate-based_Authentication). 
 For this application, we assume a single CA will be issuing client certificates for both server and clients
 (in production, we would split the server and client CAs, as well as rotate them).
-For simplicity here, production certificate management being very complex, we will generate the certificates locally;
-test certificates as well as instructions on how to re-create and test them can be found in the
-[README file](/certs/README.md) of the `/certs` folder.
+For simplicity here, production certificate management being very complex, we will generate a CA Root certificate locally using 
+`ssh-keygen` and similarly issuing server and client certificates, which we'll then load them from the local file system.
+We'll include some test certificates in the `/certs` folders, as well as instructions on how to re-create and test them
+using `openssl` in the [README file](/certs/README.md) within.
 
-- In a more robust implementation, for each upstream we could provide a client certificate to encrypt the traffic between the proxy and the upstream
-(which has the server cert in this case), and also to ensure only authorized proxies can connect directly tp upstream servers. 
+- Additionally, for each upstream, we could provide a client certificate to encrypt the traffic between the proxy and the upstream
+(which is the server in this case), and also to ensure only authorized proxies can connect directly tp upstream servers. 
 This may be omitted if this layer of security doesn't make sense for the application or environment in question.
-- Different ciphers, particularly ECDSA, could be considered for a production server
 
 #### Authentication
 
