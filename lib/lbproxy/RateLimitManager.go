@@ -16,4 +16,9 @@ type RateLimitManager interface {
 	ReleaseConnection()
 }
 
-// TODO: implement interface
+// RateLimitManagerConfig captures RateLimitManager instance configuration parameters
+type RateLimitManagerConfig struct {
+	MaxOpenConnections   int   // How many concurrent OPEN connections are allowed
+	MaxRateAmount        int   // How many connections can be opened per time period
+	MaxRatePeriodSeconds int64 // The size of the sliding window for MaxRateAmount
+}
