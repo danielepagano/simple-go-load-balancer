@@ -1,19 +1,22 @@
 package lbproxy
 
 import (
+	"log"
 	"sync"
 	"time"
 )
 
 type rlManager struct {
 	sync.RWMutex
+	tag                    string // for diagnostics
 	config                 RateLimitManagerConfig
 	currentOpenConnections int
 	addedTimestamps        []int64
 }
 
-func CreateRateLimitManager(config RateLimitManagerConfig) RateLimitManager {
+func CreateRateLimitManager(tag string, config RateLimitManagerConfig) RateLimitManager {
 	return &rlManager{
+		tag:                    tag,
 		config:                 config,
 		currentOpenConnections: 0,
 		addedTimestamps:        []int64{},
@@ -27,6 +30,7 @@ func (m *rlManager) AddConnection() bool {
 
 	// If you have too many connections already open, deny
 	if m.currentOpenConnections >= m.config.MaxOpenConnections {
+		log.Println("RLM", m.tag, "DENIED open:", m.currentOpenConnections, "max:", m.config.MaxOpenConnections)
 		return false
 	}
 
@@ -34,10 +38,11 @@ func (m *rlManager) AddConnection() bool {
 	currentTs := time.Now().Unix()
 	if len(m.addedTimestamps) >= m.config.MaxRateAmount {
 		windowStart := currentTs - m.config.MaxRatePeriodSeconds
-		// TODO: off by one? First retry pretty quickly always fails?
+		// TODO: test this further to ensure rate limit enforcement is solid
 		// trim items outside of window
 		m.addedTimestamps = trimTimestamps(m.addedTimestamps, windowStart)
 		if len(m.addedTimestamps) >= m.config.MaxRateAmount {
+			log.Println("RLM", m.tag, "DENIED ts:", m.addedTimestamps, "max:", m.config.MaxRateAmount)
 			return false
 		}
 	}
@@ -45,6 +50,7 @@ func (m *rlManager) AddConnection() bool {
 	// If we got here, we're allowing the connection
 	m.currentOpenConnections += 1
 	m.addedTimestamps = append(m.addedTimestamps, currentTs)
+	log.Println("RLM+", m.tag, "open:", m.currentOpenConnections, "ts:", m.addedTimestamps)
 	return true
 }
 
@@ -54,6 +60,7 @@ func (m *rlManager) ReleaseConnection() {
 		m.currentOpenConnections -= 1
 	}
 	m.Unlock()
+	log.Println("RLM-", m.tag, "open:", m.currentOpenConnections, "ts:", m.addedTimestamps)
 }
 
 func trimTimestamps(ts []int64, windowStart int64) []int64 {

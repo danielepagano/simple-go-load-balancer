@@ -2,6 +2,10 @@ package internal
 
 import "github.com/danielepagano/teleport-int-load-balancer/lib/lbproxy"
 
+// GetStaticConfig is a placeholder source for configuration
+// To test these apps easily (without security), open an echo server for each upstream, e.g. `ncat -l 1230 --keep-open --exec "/bin/cat"`
+// you can then use nc to send data through proxy, e.g. `nc localhost 9001` would connect to app1, and you should see echos
+// You can simulate EOF in both direction by using Ctrl-C on either nc (client) or ncat (server)
 func GetStaticConfig() *ServerConfig {
 	return &ServerConfig{
 		Apps: []AppConfig{

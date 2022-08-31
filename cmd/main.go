@@ -8,20 +8,23 @@ import (
 )
 
 func main() {
+	log.Println("Initializing Load-balancing Proxy")
+	// This would be the place to load config from params, env vars etc. without changing anything else
 	config := internal.GetStaticConfig()
-	stopSignal := make(chan bool, 1)
 
 	for _, app := range config.Apps {
 		s := &internal.ProxyServer{
 			App:                    app,
 			DefaultRateLimitConfig: config.DefaultRateLimitConfig,
 		}
-		appId := app.AppId
+		appId := app.AppId // fix value from loop
+
+		// Async start each app; server will not panic if some apps fail to start (usually port busy)
+		// This would be a pretty loud alert in a real system
 		go func() {
-			log.Println("Starting " + appId)
-			err := s.StartServer(stopSignal)
+			err := s.StartServer()
 			if err != nil {
-				log.Println("Application failed to start:", appId)
+				log.Println("ERROR - Application failed to start:", appId, "ERROR:", err)
 			}
 		}()
 	}
@@ -31,7 +34,6 @@ func main() {
 	signal.Notify(sigInt, os.Interrupt)
 	<-sigInt
 
-	// Signal apps to stop
-	stopSignal <- true
 	log.Println("bye.")
+	os.Exit(0)
 }

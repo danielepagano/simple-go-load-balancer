@@ -9,6 +9,8 @@ import (
 	"sync"
 )
 
+const LogClosedConnErrors = false
+
 func InitApplication(config ApplicationConfig) Application {
 	app := &application{
 		config:       config,
@@ -27,112 +29,82 @@ type application struct {
 	upstreamConn map[string]int
 }
 
-func (a *application) SubmitConnection(client net.Conn, rlm RateLimitManager, stopSignal chan bool) {
+func (a *application) SubmitConnection(client net.Conn, rlm RateLimitManager) {
 	// Rate-limit exceeded; close client connection
 	appId := a.config.Name
 	if !rlm.AddConnection() {
 		log.Println("Rate limit exceeded for app", appId)
-		a.closeClientConnection(client, rlm)
+		// Close connection; it was never added to count of open connections in rlm;
+		// No further clean-up necessary
+		a.closeConnection(client)
 	} else {
-		defer a.closeClientConnection(client, rlm)
-
-		for {
-			select {
-			case <-stopSignal:
-				return
-			default:
-				a.proxyConnection(client, rlm)
-				// Stop and close client connection
-				return
-			}
-		}
+		// Release the connection from RLM after proxying is completed
+		defer rlm.ReleaseConnection()
+		a.proxyConnection(client)
 	}
 }
 
-func (a *application) proxyConnection(clientConn net.Conn, rlm RateLimitManager) {
+func (a *application) proxyConnection(clientConn net.Conn) {
+	// Use an upstream connection within this scope
 	upStream := a.acquireUpstream()
-	// defer a.releaseUpstream(upStream)
-	upstreamConn, err := net.DialTimeout("tcp", upStream, UpstreamTimeout)
+	defer a.releaseUpstream(upStream)
 
+	// Negotiate an upstream connection
+	tcpAddress, err := net.ResolveTCPAddr(Protocol, upStream)
 	if err != nil {
-		log.Println("Error connecting to upstream", upStream, "ERR:", err)
-		// Give up. In a more mature system, we'd quarantine this upstream and try another upstream
-		a.releaseUpstream(upStream)
-		a.closeClientConnection(clientConn, rlm)
+		log.Println(a.config.Name, ": could resolve upstream address", upStream, "ERROR:", err)
+		// Configuration issue; in a more mature system, we would remove this upstream from the list and raise an alert
+		a.closeConnection(clientConn)
 		return
 	}
-	// defer a.closeUpstreamConnection(upstreamConn, upStream)
-	serverClosed := make(chan bool, 1)
-	clientClosed := make(chan bool, 1)
-
-	// TODO: not quite right... double-closes and no client close on server kill
-
-	go a.sendToUpstream(clientConn, upstreamConn, rlm, clientClosed)
-	go a.returnToClient(upstreamConn, clientConn, upStream, serverClosed)
-
-	var fullyClosed chan bool
-	select {
-	case <-clientClosed:
-		a.closeUpstreamConnection(upstreamConn, upStream)
-		fullyClosed = serverClosed
-	case <-serverClosed:
-		a.closeClientConnection(clientConn, rlm)
-		fullyClosed = clientClosed
-	}
-
-	// Wait here, so that we wait to perform deferred close actions
-	<-fullyClosed
-}
-
-func (a *application) sendToUpstream(upstreamConn, clientConn net.Conn, rlm RateLimitManager, srcClosed chan bool) {
-	_, err := io.Copy(upstreamConn, clientConn)
+	upstreamConn, err := net.DialTCP("tcp", nil, tcpAddress)
 
 	if err != nil {
-		log.Println("Copy error", err)
+		log.Println(a.config.Name, ": error connecting to upstream", upStream, "ERR:", err)
+		// Give up and disconnect client.
+		// In a more mature system, we'd quarantine this upstream and try another upstream
+		a.closeConnection(clientConn)
+		return
 	}
 
-	a.closeClientConnection(clientConn, rlm)
-	srcClosed <- true
+	defer a.closeConnection(upstreamConn)
+	defer a.closeConnection(clientConn) // Move at beginning of method if we continue to use this closing pattern
+
+	aSourceClosed := make(chan struct{}, 1)
+
+	go a.pipe(clientConn, upstreamConn, aSourceClosed)
+	go a.pipe(upstreamConn, clientConn, aSourceClosed)
+
+	// Wait until one side sends EOF or has error, at which point we'll exit this,
+	// which will hit the deferred closes and wrap up everything
+	<-aSourceClosed
+
+	// TODO: this is simple and works, but we get "use of closed network connection" since we are
+	// double-closing at least one connection; see how to safely add more synchronization smarts to avoid that
 }
 
-func (a *application) returnToClient(clientConn, upstreamConn net.Conn, upStream string, srcClosed chan bool) {
-	_, err := io.Copy(clientConn, upstreamConn)
+func (a *application) pipe(dest, source net.Conn, srcClosed chan struct{}) {
+	_, err := io.Copy(dest, source)
 
-	if err != nil {
-		log.Println("Copy error", err)
+	alreadyClosed := err != nil && strings.Contains(err.Error(), "use of closed network connection")
+	if err != nil && (LogClosedConnErrors || !alreadyClosed) {
+		log.Println("Network IO error", err)
 	}
 
-	a.closeUpstreamConnection(upstreamConn, upStream)
-	srcClosed <- true
+	srcClosed <- struct{}{}
 }
 
-func (a *application) closeClientConnection(c net.Conn, rlm RateLimitManager) {
+func (a *application) closeConnection(c net.Conn) {
 	err := c.Close()
 	alreadyClosed := err != nil && strings.Contains(err.Error(), "use of closed network connection")
-	if err != nil {
+	if err != nil && (LogClosedConnErrors || !alreadyClosed) {
 		log.Println("Failed to close connection to", c.RemoteAddr(), "ERROR", err)
-	}
-
-	// If the error was that the connection was already closed, do not perform connection accounting done
-	if err == nil && !alreadyClosed {
-		rlm.ReleaseConnection()
-	}
-}
-
-func (a *application) closeUpstreamConnection(c net.Conn, upstream string) {
-	err := c.Close()
-	alreadyClosed := err != nil && strings.Contains(err.Error(), "use of closed network connection")
-	if err != nil && !alreadyClosed {
-		log.Println("Failed to close connection to", c.RemoteAddr(), "ERROR", err)
-	}
-
-	// If the error was that the connection was already closed, do not perform connection accounting done
-	if err == nil && !alreadyClosed {
-		a.releaseUpstream(upstream)
 	}
 }
 
 func (a *application) acquireUpstream() string {
+	// Thread-safe map operation to find and increase active connections per upstream
+	// Follow with defer acquireUpstream()
 	a.routingLock.Lock()
 	defer a.routingLock.Unlock()
 	minConn := math.MaxInt
@@ -149,6 +121,7 @@ func (a *application) acquireUpstream() string {
 }
 
 func (a *application) releaseUpstream(upstream string) string {
+	// Tracks a released connection from an upstream
 	a.routingLock.Lock()
 	defer a.routingLock.Unlock()
 	if a.upstreamConn[upstream] > 0 {
