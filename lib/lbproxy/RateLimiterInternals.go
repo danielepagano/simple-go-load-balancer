@@ -48,7 +48,12 @@ func (m *rlManager) AddConnection() bool {
 
 	// If we got here, we're allowing the connection
 	m.currentOpenConnections += 1
-	m.addedTimestamps = append(m.addedTimestamps, currentTs)
+
+	// Only track added timestamps if connection rate-limiting is enabled, as the code above will limit inserts.
+	// Without this check, we'll simply keep adding timestamps to the list then rate limiting is not enabled
+	if m.config.MaxRateAmount >= 0 {
+		m.addedTimestamps = append(m.addedTimestamps, currentTs)
+	}
 	log.Println("RLM+", m.tag, "open:", m.currentOpenConnections, "ts:", m.addedTimestamps)
 	return true
 }

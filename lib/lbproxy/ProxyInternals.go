@@ -5,11 +5,9 @@ import (
 	"log"
 	"math"
 	"net"
-	"strings"
 	"sync"
 )
 
-const ClosedConnError = "use of closed network connection"
 const LogClosedConnErrors = false
 
 func InitApplication(config ApplicationConfig) Application {
@@ -61,7 +59,6 @@ func (a *application) proxyConnection(clientConn net.Conn) {
 		return
 	}
 	upstreamConn, err := net.DialTCP("tcp", nil, tcpAddress)
-
 	if err != nil {
 		log.Println(a.config.Name, ": error connecting to upstream", upStream, "ERR:", err)
 		// Give up and disconnect client.
@@ -89,8 +86,7 @@ func (a *application) pipe(dest, source net.Conn, srcClosed chan struct{}) {
 	// manually copy the data between the connections, as io.Copy continues until error or EOF
 	_, err := io.Copy(dest, source)
 
-	alreadyClosed := err != nil && strings.Contains(err.Error(), ClosedConnError)
-	if err != nil && (LogClosedConnErrors || !alreadyClosed) {
+	if err != nil && (LogClosedConnErrors || !IsErrorClosedNetworkConnection(err)) {
 		log.Println("Network IO error", err)
 	}
 
@@ -99,8 +95,7 @@ func (a *application) pipe(dest, source net.Conn, srcClosed chan struct{}) {
 
 func (a *application) closeConnection(c net.Conn) {
 	err := c.Close()
-	alreadyClosed := err != nil && strings.Contains(err.Error(), ClosedConnError)
-	if err != nil && (LogClosedConnErrors || !alreadyClosed) {
+	if err != nil && (LogClosedConnErrors || !IsErrorClosedNetworkConnection(err)) {
 		log.Println("Failed to close connection to", c.RemoteAddr(), "ERROR", err)
 	}
 }
@@ -123,7 +118,7 @@ func (a *application) acquireUpstream() string {
 	return upstream
 }
 
-func (a *application) releaseUpstream(upstream string) string {
+func (a *application) releaseUpstream(upstream string) {
 	// Tracks a released connection from an upstream
 	a.routingLock.Lock()
 	defer a.routingLock.Unlock()
@@ -131,5 +126,5 @@ func (a *application) releaseUpstream(upstream string) string {
 		a.upstreamConn[upstream] -= 1
 	}
 	log.Println("Released upstream", upstream, "LOAD:", a.upstreamConn)
-	return upstream
+	return
 }

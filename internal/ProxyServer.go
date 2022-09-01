@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"fmt"
 	"github.com/danielepagano/teleport-int-load-balancer/lib/lbproxy"
 	"log"
 	"net"
@@ -8,15 +9,32 @@ import (
 
 const LocalServerPrefix = ":"
 
-type ProxyServer struct {
-	App                    AppConfig
-	DefaultRateLimitConfig lbproxy.RateLimitManagerConfig
-	rateManagers           map[string]lbproxy.RateLimitManager
+type ProxyServerConfig struct {
+	App             AppConfig
+	RateLimitConfig lbproxy.RateLimitManagerConfig
 }
 
-func (s *ProxyServer) StartServer() error {
-	s.rateManagers = make(map[string]lbproxy.RateLimitManager)
+type ProxyServer struct {
+	config       ProxyServerConfig
+	rateManagers map[string]lbproxy.RateLimitManager
+}
 
+func NewProxyServer(config ProxyServerConfig) (*ProxyServer, error) {
+	if config.RateLimitConfig.MaxOpenConnections == 0 ||
+		config.RateLimitConfig.MaxRateAmount == 0 {
+		return nil, fmt.Errorf("application has zero allowed rate")
+	}
+	if len(config.App.Upstreams) < 1 {
+		return nil, fmt.Errorf("at least one upstream per app is required")
+	}
+
+	return &ProxyServer{
+		config:       config,
+		rateManagers: make(map[string]lbproxy.RateLimitManager),
+	}, nil
+}
+
+func (s *ProxyServer) Start() error {
 	listener, err := s.startListener()
 	if err != nil {
 		return err
@@ -24,8 +42,9 @@ func (s *ProxyServer) StartServer() error {
 	defer s.closeListener(listener)
 
 	// Creates the application that will proxy and load-balance the incoming traffic
-	app := lbproxy.InitApplication(s.App.ToApplicationConfig())
-	log.Println("STARTED APP", s.App.AppId, "on port", s.App.ProxyPort)
+	app := s.config.App
+	lbProxyApp := lbproxy.InitApplication(app.ToApplicationConfig())
+	log.Println("STARTED APP", app.AppId, "on port", app.ProxyPort)
 
 	// Listen loop
 	// Currently we accept connections from a single thread per app,
@@ -34,33 +53,41 @@ func (s *ProxyServer) StartServer() error {
 	for {
 		conn, err := listener.AcceptTCP()
 		if err != nil {
-			log.Println("APP", s.App.AppId, "Failed to accept client connection", conn, "ERROR:", err)
-			continue
+			log.Println("APP", app.AppId, "Failed to accept client connection", conn, "ERROR:", err)
+			// If connection was closed, it means listener was closed; exit the application server
+			// otherwise, we try and can accept future connections
+			if lbproxy.IsErrorClosedNetworkConnection(err) {
+				return err
+			}
+		} else {
+			// TODO: temporarily until auth, the clientId is just localhost
+			clientId := "localhost"
+
+			s.handoffConnection(clientId, lbProxyApp, conn)
 		}
-
-		// TODO: temporarily until auth, the clientId is just the remote address
-		clientId := "localhost"
-
-		// Creates one rate-limit manager per (app,clientId)
-		// If we wanted to track rate limits across app for each client, we would create a thread-safe
-		// wrapper around a map that would be injected by the caller, so method app would do something like
-		// rlmStore.getRateLimitManager(clientId), which would get or create the instance for this client
-		var rlm lbproxy.RateLimitManager
-		var found bool
-		if rlm, found = s.rateManagers[clientId]; !found {
-			rlm = lbproxy.CreateRateLimitManager(clientId+"@"+s.App.AppId, s.DefaultRateLimitConfig)
-			s.rateManagers[clientId] = rlm
-		}
-
-		// Hand off the connection to lbproxy and prepare to receive a new one
-		go app.SubmitConnection(conn, rlm)
 	}
 }
 
+func (s *ProxyServer) handoffConnection(clientId string, lbProxyApp lbproxy.Application, conn *net.TCPConn) {
+	// Creates one rate-limit manager per (app,clientId)
+	// If we wanted to track rate limits across app for each client, we would create a thread-safe
+	// wrapper around a map that would be injected by the caller, so method app would do something like
+	// rlmStore.getRateLimitManager(clientId), which would get or create the instance for this client
+	var rlm lbproxy.RateLimitManager
+	var found bool
+	if rlm, found = s.rateManagers[clientId]; !found {
+		rlm = lbproxy.CreateRateLimitManager(clientId+"@"+s.config.App.AppId, s.config.RateLimitConfig)
+		s.rateManagers[clientId] = rlm
+	}
+
+	// Hand off the connection to lbproxy and prepare to receive a new one
+	go lbProxyApp.SubmitConnection(conn, rlm)
+}
+
 func (s *ProxyServer) startListener() (*net.TCPListener, error) {
-	tcpAddress, err := net.ResolveTCPAddr(lbproxy.Protocol, LocalServerPrefix+s.App.ProxyPort)
+	tcpAddress, err := net.ResolveTCPAddr(lbproxy.Protocol, LocalServerPrefix+s.config.App.ProxyPort)
 	if err != nil {
-		log.Println("Could resolve local TCP address for listening on port", s.App.ProxyPort, "ERROR:", err)
+		log.Println("Could resolve local TCP address for listening on port", s.config.App.ProxyPort, "ERROR:", err)
 		return nil, err
 	}
 
@@ -76,7 +103,7 @@ func (s *ProxyServer) closeListener(listener *net.TCPListener) {
 	func(ln *net.TCPListener) {
 		err := ln.Close()
 		if err != nil {
-			log.Println("Failed to close listener for app", s.App.AppId, "ERROR:", err)
+			log.Println("Failed to close listener for app", s.config.App.AppId, "ERROR:", err)
 		}
 	}(listener)
 }

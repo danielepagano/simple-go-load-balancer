@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/danielepagano/teleport-int-load-balancer/internal"
+	"github.com/danielepagano/teleport-int-load-balancer/lib/lbproxy"
 	"log"
 	"os"
 	"os/signal"
@@ -13,20 +14,9 @@ func main() {
 	config := internal.GetStaticConfig()
 
 	for _, app := range config.Apps {
-		s := &internal.ProxyServer{
-			App:                    app,
-			DefaultRateLimitConfig: config.DefaultRateLimitConfig,
-		}
-		appId := app.AppId // fix value from loop
-
 		// Async start each app; server will not panic if some apps fail to start (usually port busy)
 		// This would be a pretty loud alert in a real system
-		go func() {
-			err := s.StartServer()
-			if err != nil {
-				log.Println("ERROR - Application failed to start:", appId, "ERROR:", err)
-			}
-		}()
+		go startAppServer(app, config.DefaultRateLimitConfig)
 	}
 
 	// Wait until Ctrl-C or equivalent
@@ -36,4 +26,23 @@ func main() {
 
 	log.Println("bye.")
 	os.Exit(0)
+}
+
+func startAppServer(app internal.AppConfig, rateLimitConfig lbproxy.RateLimitManagerConfig) {
+	serverConfig := internal.ProxyServerConfig{
+		App:             app,
+		RateLimitConfig: rateLimitConfig,
+	}
+
+	// Initialize and check configuration
+	server, err := internal.NewProxyServer(serverConfig)
+	if err != nil {
+		log.Println("ERROR - could not initialise server for", app.AppId, "ERROR:", err)
+	}
+
+	// Try and start server
+	err = server.Start()
+	if err != nil {
+		log.Println("ERROR - server failed to start for", app.AppId, "ERROR:", err)
+	}
 }
