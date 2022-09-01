@@ -29,16 +29,15 @@ func (m *rlManager) AddConnection() bool {
 	defer m.Unlock()
 
 	// If you have too many connections already open, deny
-	if m.currentOpenConnections >= m.config.MaxOpenConnections {
+	if m.config.MaxOpenConnections >= 0 && m.currentOpenConnections >= m.config.MaxOpenConnections {
 		log.Println("RLM", m.tag, "DENIED open:", m.currentOpenConnections, "max:", m.config.MaxOpenConnections)
 		return false
 	}
 
 	// Only check added connection if we could possibly fail
 	currentTs := time.Now().Unix()
-	if len(m.addedTimestamps) >= m.config.MaxRateAmount {
+	if m.config.MaxRateAmount >= 0 && len(m.addedTimestamps) >= m.config.MaxRateAmount {
 		windowStart := currentTs - m.config.MaxRatePeriodSeconds
-		// TODO: test this further to ensure rate limit enforcement is solid
 		// trim items outside of window
 		m.addedTimestamps = trimTimestamps(m.addedTimestamps, windowStart)
 		if len(m.addedTimestamps) >= m.config.MaxRateAmount {

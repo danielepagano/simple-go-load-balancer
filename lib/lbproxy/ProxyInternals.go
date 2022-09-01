@@ -9,6 +9,7 @@ import (
 	"sync"
 )
 
+const ClosedConnError = "use of closed network connection"
 const LogClosedConnErrors = false
 
 func InitApplication(config ApplicationConfig) Application {
@@ -49,12 +50,14 @@ func (a *application) proxyConnection(clientConn net.Conn) {
 	upStream := a.acquireUpstream()
 	defer a.releaseUpstream(upStream)
 
+	// Close client connection when completed or denied
+	defer a.closeConnection(clientConn)
+
 	// Negotiate an upstream connection
 	tcpAddress, err := net.ResolveTCPAddr(Protocol, upStream)
 	if err != nil {
 		log.Println(a.config.Name, ": could resolve upstream address", upStream, "ERROR:", err)
 		// Configuration issue; in a more mature system, we would remove this upstream from the list and raise an alert
-		a.closeConnection(clientConn)
 		return
 	}
 	upstreamConn, err := net.DialTCP("tcp", nil, tcpAddress)
@@ -63,12 +66,10 @@ func (a *application) proxyConnection(clientConn net.Conn) {
 		log.Println(a.config.Name, ": error connecting to upstream", upStream, "ERR:", err)
 		// Give up and disconnect client.
 		// In a more mature system, we'd quarantine this upstream and try another upstream
-		a.closeConnection(clientConn)
 		return
 	}
 
 	defer a.closeConnection(upstreamConn)
-	defer a.closeConnection(clientConn) // Move at beginning of method if we continue to use this closing pattern
 
 	aSourceClosed := make(chan struct{}, 1)
 
@@ -79,14 +80,16 @@ func (a *application) proxyConnection(clientConn net.Conn) {
 	// which will hit the deferred closes and wrap up everything
 	<-aSourceClosed
 
-	// TODO: this is simple and works, but we get "use of closed network connection" since we are
-	// double-closing at least one connection; see how to safely add more synchronization smarts to avoid that
+	// Note that we will routinely attempt to close some connection after they are already closed
+	// We could avoid this with some more complex coordination, at the risk of more concurrency issues
 }
 
 func (a *application) pipe(dest, source net.Conn, srcClosed chan struct{}) {
+	// If we wanted to implement bandwidth rate-limiting/throttling, we would need to
+	// manually copy the data between the connections, as io.Copy continues until error or EOF
 	_, err := io.Copy(dest, source)
 
-	alreadyClosed := err != nil && strings.Contains(err.Error(), "use of closed network connection")
+	alreadyClosed := err != nil && strings.Contains(err.Error(), ClosedConnError)
 	if err != nil && (LogClosedConnErrors || !alreadyClosed) {
 		log.Println("Network IO error", err)
 	}
@@ -96,7 +99,7 @@ func (a *application) pipe(dest, source net.Conn, srcClosed chan struct{}) {
 
 func (a *application) closeConnection(c net.Conn) {
 	err := c.Close()
-	alreadyClosed := err != nil && strings.Contains(err.Error(), "use of closed network connection")
+	alreadyClosed := err != nil && strings.Contains(err.Error(), ClosedConnError)
 	if err != nil && (LogClosedConnErrors || !alreadyClosed) {
 		log.Println("Failed to close connection to", c.RemoteAddr(), "ERROR", err)
 	}
