@@ -25,7 +25,7 @@ func NewProxyServer(config ProxyServerConfig) (*ProxyServer, error) {
 		config.RateLimitConfig.MaxRateAmount == 0 {
 		return nil, fmt.Errorf("application has zero allowed rate")
 	}
-	if len(config.App.Upstreams) < 1 {
+	if len(config.App.Upstreams) ==  0 {
 		return nil, fmt.Errorf("at least one upstream per app is required")
 	}
 
