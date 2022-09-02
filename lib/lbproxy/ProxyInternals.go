@@ -1,6 +1,7 @@
 package lbproxy
 
 import (
+	"errors"
 	"io"
 	"log"
 	"math"
@@ -86,7 +87,7 @@ func (a *application) pipe(dest, source net.Conn, srcClosed chan struct{}) {
 	// manually copy the data between the connections, as io.Copy continues until error or EOF
 	_, err := io.Copy(dest, source)
 
-	if err != nil && (LogClosedConnErrors || !IsErrorClosedNetworkConnection(err)) {
+	if err != nil && (LogClosedConnErrors || !errors.Is(err, net.ErrClosed)) {
 		log.Println("Network IO error", err)
 	}
 
@@ -95,7 +96,7 @@ func (a *application) pipe(dest, source net.Conn, srcClosed chan struct{}) {
 
 func (a *application) closeConnection(c net.Conn) {
 	err := c.Close()
-	if err != nil && (LogClosedConnErrors || !IsErrorClosedNetworkConnection(err)) {
+	if err != nil && (LogClosedConnErrors || !errors.Is(err, net.ErrClosed)) {
 		log.Println("Failed to close connection to", c.RemoteAddr(), "ERROR", err)
 	}
 }

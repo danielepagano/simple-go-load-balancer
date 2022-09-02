@@ -25,7 +25,6 @@ func main() {
 	<-sigInt
 
 	log.Println("bye.")
-	os.Exit(0)
 }
 
 func startAppServer(app internal.AppConfig, rateLimitConfig lbproxy.RateLimitManagerConfig) {
@@ -38,6 +37,7 @@ func startAppServer(app internal.AppConfig, rateLimitConfig lbproxy.RateLimitMan
 	server, err := internal.NewProxyServer(serverConfig)
 	if err != nil {
 		log.Println("ERROR - could not initialise server for", app.AppId, "ERROR:", err)
+		return
 	}
 
 	// Try and start server

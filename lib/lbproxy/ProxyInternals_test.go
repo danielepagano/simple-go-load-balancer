@@ -5,7 +5,6 @@ import (
 	"net"
 	"sync"
 	"testing"
-	"time"
 )
 
 func Test_application_SubmitConnection(t *testing.T) {
@@ -31,7 +30,7 @@ func Test_application_SubmitConnection(t *testing.T) {
 	}
 	upstreamAddress := upstreamListener.Addr().String()
 	log.Println("UT upstream running on", upstreamAddress)
-	
+
 	go func() {
 		defer upstreamListener.Close()
 		conn, err := upstreamListener.Accept()
@@ -40,9 +39,13 @@ func Test_application_SubmitConnection(t *testing.T) {
 			log.Fatalln("Could not accept incoming", err)
 		}
 
-		time.Sleep(1 * time.Second)
-		log.Println("Upstream disconnecting after 1 second")
-		_ = conn.Close()
+		go func() {
+			log.Println("Upstream disconnecting async")
+			err = conn.Close()
+			if err != nil {
+				log.Fatalln("Could not close client conn", err)
+			}
+		}()
 	}()
 
 	proxyListener, err := net.Listen("tcp", "127.0.0.1:0")

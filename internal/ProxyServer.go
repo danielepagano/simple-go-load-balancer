@@ -1,13 +1,14 @@
 package internal
 
 import (
+	"errors"
 	"fmt"
 	"github.com/danielepagano/teleport-int-load-balancer/lib/lbproxy"
 	"log"
 	"net"
 )
 
-const LocalServerPrefix = ":"
+const localServerPrefix = ":"
 
 type ProxyServerConfig struct {
 	App             AppConfig
@@ -56,7 +57,7 @@ func (s *ProxyServer) Start() error {
 			log.Println("APP", app.AppId, "Failed to accept client connection", conn, "ERROR:", err)
 			// If connection was closed, it means listener was closed; exit the application server
 			// otherwise, we try and can accept future connections
-			if lbproxy.IsErrorClosedNetworkConnection(err) {
+			if errors.Is(err, net.ErrClosed) {
 				return err
 			}
 		} else {
@@ -85,7 +86,7 @@ func (s *ProxyServer) handoffConnection(clientId string, lbProxyApp lbproxy.Appl
 }
 
 func (s *ProxyServer) startListener() (*net.TCPListener, error) {
-	tcpAddress, err := net.ResolveTCPAddr(lbproxy.Protocol, LocalServerPrefix+s.config.App.ProxyPort)
+	tcpAddress, err := net.ResolveTCPAddr(lbproxy.Protocol, localServerPrefix+s.config.App.ProxyPort)
 	if err != nil {
 		log.Println("Could resolve local TCP address for listening on port", s.config.App.ProxyPort, "ERROR:", err)
 		return nil, err
@@ -99,11 +100,9 @@ func (s *ProxyServer) startListener() (*net.TCPListener, error) {
 	return listener, nil
 }
 
-func (s *ProxyServer) closeListener(listener *net.TCPListener) {
-	func(ln *net.TCPListener) {
-		err := ln.Close()
-		if err != nil {
-			log.Println("Failed to close listener for app", s.config.App.AppId, "ERROR:", err)
-		}
-	}(listener)
+func (s *ProxyServer) closeListener(ln *net.TCPListener) {
+	err := ln.Close()
+	if err != nil {
+		log.Println("Failed to close listener for app", s.config.App.AppId, "ERROR:", err)
+	}
 }
