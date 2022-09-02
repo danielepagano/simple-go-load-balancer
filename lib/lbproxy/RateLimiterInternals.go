@@ -78,17 +78,12 @@ func (m *rlManager) ReleaseConnection() {
 }
 
 func trimTimestamps(ts []int64, windowStart int64) []int64 {
-	newStart := -1
+	newStart := 0
 	for i, t := range ts {
 		newStart = i
 		if t >= windowStart {
 			break
 		}
-	}
-
-	// Rate-limited, window is still full
-	if newStart < 0 {
-		return ts
 	}
 
 	// Window was fully purged

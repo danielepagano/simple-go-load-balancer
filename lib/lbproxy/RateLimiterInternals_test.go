@@ -200,6 +200,14 @@ func Test_trimTimestamps(t *testing.T) {
 			},
 			want: []int64{100, 101},
 		},
+		{
+			name: "noop",
+			args: args{
+				ts:          []int64{99, 100, 101},
+				windowStart: 90,
+			},
+			want: []int64{99, 100, 101},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
