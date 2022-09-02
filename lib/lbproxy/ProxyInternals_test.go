@@ -56,9 +56,9 @@ func Test_application_SubmitConnection(t *testing.T) {
 	log.Println("UT proxy running on", proxyListener.Addr().String())
 	go func() {
 		defer proxyListener.Close()
-		_, err = proxyListener.Accept()
+		_, acceptErr := proxyListener.Accept()
 		log.Println("Proxy accepted incoming")
-		if err != nil {
+		if acceptErr != nil {
 			log.Fatalln("Could not accept incoming", err)
 		}
 	}()

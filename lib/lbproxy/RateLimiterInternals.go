@@ -18,7 +18,7 @@ type rlManager struct {
 	currentTime            unixTimeSupplier
 }
 
-func CreateRateLimitManager(tag string, config RateLimitManagerConfig) RateLimitManager {
+func CreateRateLimitManager(tag string, config RateLimitManagerConfig) *rlManager {
 	return &rlManager{
 		tag:                    tag,
 		config:                 config,
@@ -28,6 +28,7 @@ func CreateRateLimitManager(tag string, config RateLimitManagerConfig) RateLimit
 	}
 }
 
+// overrideTimeSupplier is an internal method to supply a function to mock the passage of time for testing
 func (m *rlManager) overrideTimeSupplier(supplier unixTimeSupplier) {
 	m.currentTime = supplier
 }
@@ -70,10 +71,10 @@ func (m *rlManager) AddConnection() bool {
 
 func (m *rlManager) ReleaseConnection() {
 	m.Lock()
+	defer m.Unlock()
 	if m.currentOpenConnections > 0 {
 		m.currentOpenConnections -= 1
 	}
-	m.Unlock()
 	log.Println("RLM-", m.tag, "open:", m.currentOpenConnections, "ts:", m.addedTimestamps)
 }
 

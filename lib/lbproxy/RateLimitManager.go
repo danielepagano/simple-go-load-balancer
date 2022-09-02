@@ -14,9 +14,6 @@ type RateLimitManager interface {
 
 	// ReleaseConnection decreases the count of active connections to support max open connections capping
 	ReleaseConnection()
-
-	// overrideTimeSupplier is an internal method to supply a function to mock the passage of time for testing
-	overrideTimeSupplier(supplier unixTimeSupplier)
 }
 
 // RateLimitManagerConfig captures RateLimitManager instance configuration parameters

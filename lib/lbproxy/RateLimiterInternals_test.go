@@ -105,7 +105,7 @@ func Test_RateLimitManagerMaxOpen(t *testing.T) {
 					if rlm.AddConnection() {
 						allowedCount.Add(1)
 					}
-					wg.Add(-1)
+					wg.Done()
 				}()
 			}
 			wg.Wait()

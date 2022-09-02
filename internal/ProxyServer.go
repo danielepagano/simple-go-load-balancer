@@ -88,8 +88,7 @@ func (s *ProxyServer) handoffConnection(clientId string, lbProxyApp lbproxy.Appl
 func (s *ProxyServer) startListener() (*net.TCPListener, error) {
 	tcpAddress, err := net.ResolveTCPAddr(lbproxy.Protocol, localServerPrefix+s.config.App.ProxyPort)
 	if err != nil {
-		log.Println("Could resolve local TCP address for listening on port", s.config.App.ProxyPort, "ERROR:", err)
-		return nil, err
+		return nil, fmt.Errorf("could resolve local TCP address for listening on port "+s.config.App.ProxyPort, err)
 	}
 
 	listener, err := net.ListenTCP(lbproxy.Protocol, tcpAddress)
