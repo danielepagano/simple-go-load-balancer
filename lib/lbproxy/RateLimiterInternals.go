@@ -6,12 +6,16 @@ import (
 	"time"
 )
 
+// unixTimeSupplier abstract retrieval of current time for testing harness
+type unixTimeSupplier func() int64
+
 type rlManager struct {
 	sync.RWMutex
 	tag                    string // for diagnostics
 	config                 RateLimitManagerConfig
 	currentOpenConnections int
 	addedTimestamps        []int64
+	currentTime            unixTimeSupplier
 }
 
 func CreateRateLimitManager(tag string, config RateLimitManagerConfig) RateLimitManager {
@@ -20,7 +24,12 @@ func CreateRateLimitManager(tag string, config RateLimitManagerConfig) RateLimit
 		config:                 config,
 		currentOpenConnections: 0,
 		addedTimestamps:        []int64{},
+		currentTime:            time.Now().Unix, // Current time is normally wall time, but can be changed for testing
 	}
+}
+
+func (m *rlManager) overrideTimeSupplier(supplier unixTimeSupplier) {
+	m.currentTime = supplier
 }
 
 func (m *rlManager) AddConnection() bool {
@@ -35,13 +44,14 @@ func (m *rlManager) AddConnection() bool {
 	}
 
 	// Only check added connection if we could possibly fail
-	currentTs := time.Now().Unix()
+	currentTs := m.currentTime()
 	if m.config.MaxRateAmount >= 0 && len(m.addedTimestamps) >= m.config.MaxRateAmount {
-		windowStart := currentTs - m.config.MaxRatePeriodSeconds
+		// +1 because if e.g. if we allow 1 event/sec, window will start at current time, because this timestamp has been already used
+		windowStart := currentTs - m.config.MaxRatePeriodSeconds + 1
 		// trim items outside of window
 		m.addedTimestamps = trimTimestamps(m.addedTimestamps, windowStart)
 		if len(m.addedTimestamps) >= m.config.MaxRateAmount {
-			log.Println("RLM", m.tag, "DENIED ts:", m.addedTimestamps, "max:", m.config.MaxRateAmount)
+			log.Println("RLM", m.tag, "DENIED @", currentTs, "ts:", m.addedTimestamps, "max:", m.config.MaxRateAmount)
 			return false
 		}
 	}
