@@ -18,7 +18,7 @@ type RateLimitManager interface {
 
 // RateLimitManagerConfig captures RateLimitManager instance configuration parameters
 type RateLimitManagerConfig struct {
-	MaxOpenConnections   int   // How many concurrent OPEN connections are allowed
-	MaxRateAmount        int   // How many connections can be opened per time period
+	MaxOpenConnections   int   // How many concurrent OPEN connections are allowed; -1 to remove checks
+	MaxRateAmount        int   // How many connections can be opened per time period; -1 to remove checks
 	MaxRatePeriodSeconds int64 // The size of the sliding window for MaxRateAmount
 }

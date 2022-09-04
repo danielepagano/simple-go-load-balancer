@@ -2,10 +2,9 @@ package lbproxy
 
 import (
 	"net"
-	"time"
 )
 
-const UpstreamTimeout = 5 * time.Second
+const Protocol = "tcp"
 
 // Application represents a provisioned group of upstream servers that are being load-balanced.
 // Typically, a server can expose one or more applications, one per open TCP port
@@ -13,8 +12,7 @@ type Application interface {
 	// SubmitConnection hands off a client connection to load-balance it against one of the upstream servers
 	// After the connection is submitted, the Application instance will decide whether it will be connected
 	// or not, and otherwise close it and manage any errors.
-	// stopSignal can be signaled at any time by the caller to interrupt the connection, e.g. if server is shutting down
-	SubmitConnection(clientConnection net.Conn, rateLimitManager RateLimitManager, stopSignal chan bool)
+	SubmitConnection(clientConnection net.Conn, rateLimitManager RateLimitManager)
 }
 
 // ApplicationConfig initializes an Application instance

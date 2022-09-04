@@ -2,23 +2,28 @@ package internal
 
 import "github.com/danielepagano/teleport-int-load-balancer/lib/lbproxy"
 
+// GetStaticConfig is a placeholder source for configuration
 func GetStaticConfig() *ServerConfig {
 	return &ServerConfig{
 		Apps: []AppConfig{
+			// Tests proxying to a remote http server (best with appropriately high rate limits)
 			{
-				AppId:     "app1",
+				AppId:     "httpbin",
 				ProxyPort: "9001",
 				Upstreams: []lbproxy.UpstreamServer{
-					{Address: ":1230"},
-					{Address: ":4560"},
+					{Address: "eu.httpbin.org:80"},
+					{Address: "httpbin.org:80"},
 				},
 			},
+			// Open an echo server for each upstream, e.g. `ncat -l 9098 --keep-open --exec "/bin/cat"`;
+			// you can then use `nc localhost 9002` to send data through proxy, and you should see echos
+			// You can simulate EOF in both direction by using Ctrl-C on either nc (client) or ncat (server)
 			{
-				AppId:     "app2",
+				AppId:     "echo",
 				ProxyPort: "9002",
 				Upstreams: []lbproxy.UpstreamServer{
-					{Address: ":3210"},
-					{Address: ":6540"},
+					{Address: ":9098"},
+					{Address: ":9099"},
 				},
 			},
 		},
@@ -37,9 +42,9 @@ func GetStaticConfig() *ServerConfig {
 			},
 		},
 		DefaultRateLimitConfig: lbproxy.RateLimitManagerConfig{
-			MaxOpenConnections:   3,
-			MaxRateAmount:        2,
-			MaxRatePeriodSeconds: 5,
+			MaxOpenConnections:   5,
+			MaxRateAmount:        5,
+			MaxRatePeriodSeconds: 10,
 		},
 	}
 }
