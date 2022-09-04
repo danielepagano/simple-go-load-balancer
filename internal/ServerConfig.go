@@ -27,19 +27,10 @@ func GetStaticConfig() *ServerConfig {
 				},
 			},
 		},
-		Clients: []ClientConfig{
-			{
-				ClientId:      "one.com",
-				AllowedAppIds: []string{"app1"},
-			},
-			{
-				ClientId:      "two.com",
-				AllowedAppIds: []string{"app2"},
-			},
-			{
-				ClientId:      "all.com",
-				AllowedAppIds: []string{"app1", "app2"},
-			},
+		Clients: map[string][]string{
+			"one.com":   {"httpbin"},
+			"two.com":   {"echo"},
+			"localhost": {"httpbin", "echo"},
 		},
 		DefaultRateLimitConfig: lbproxy.RateLimitManagerConfig{
 			MaxOpenConnections:   5,
@@ -58,7 +49,7 @@ func (c *AppConfig) ToApplicationConfig() lbproxy.ApplicationConfig {
 
 type ServerConfig struct {
 	Apps                   []AppConfig
-	Clients                []ClientConfig
+	Clients                map[string][]string
 	DefaultRateLimitConfig lbproxy.RateLimitManagerConfig
 }
 
@@ -66,9 +57,4 @@ type AppConfig struct {
 	AppId     string
 	ProxyPort string
 	Upstreams []lbproxy.UpstreamServer
-}
-
-type ClientConfig struct {
-	ClientId      string
-	AllowedAppIds []string
 }

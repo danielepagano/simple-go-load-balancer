@@ -13,10 +13,15 @@ func main() {
 	// This would be the place to load config from params, env vars etc. without changing anything else
 	config := internal.GetStaticConfig()
 
+	authn := &internal.StaticAuthN{}
+	authz := &internal.SimpleAuthZ{
+		ClientPermissions: config.Clients,
+	}
+
 	for _, app := range config.Apps {
 		// Async start each app; server will not panic if some apps fail to start (usually port busy)
 		// This would be a pretty loud alert in a real system
-		go startAppServer(app, config.DefaultRateLimitConfig)
+		go startAppServer(app, config.DefaultRateLimitConfig, authn, authz)
 	}
 
 	// Wait until Ctrl-C or equivalent
@@ -27,10 +32,13 @@ func main() {
 	log.Println("bye.")
 }
 
-func startAppServer(app internal.AppConfig, rateLimitConfig lbproxy.RateLimitManagerConfig) {
+func startAppServer(app internal.AppConfig, rateLimitConfig lbproxy.RateLimitManagerConfig,
+	authn internal.AuthenticationProvider, authz internal.AuthorizationProvider) {
 	serverConfig := internal.ProxyServerConfig{
 		App:             app,
 		RateLimitConfig: rateLimitConfig,
+		Authn:           authn,
+		Authz:           authz,
 	}
 
 	// Initialize and check configuration

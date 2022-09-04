@@ -13,6 +13,8 @@ const localServerPrefix = ":"
 type ProxyServerConfig struct {
 	App             AppConfig
 	RateLimitConfig lbproxy.RateLimitManagerConfig
+	Authn           AuthenticationProvider
+	Authz           AuthorizationProvider
 }
 
 type ProxyServer struct {
@@ -25,7 +27,7 @@ func NewProxyServer(config ProxyServerConfig) (*ProxyServer, error) {
 		config.RateLimitConfig.MaxRateAmount == 0 {
 		return nil, fmt.Errorf("application has zero allowed rate")
 	}
-	if len(config.App.Upstreams) ==  0 {
+	if len(config.App.Upstreams) == 0 {
 		return nil, fmt.Errorf("at least one upstream per app is required")
 	}
 
@@ -61,12 +63,39 @@ func (s *ProxyServer) Start() error {
 				return err
 			}
 		} else {
-			// TODO: temporarily until auth, the clientId is just localhost
-			clientId := "localhost"
-
-			s.handoffConnection(clientId, lbProxyApp, conn)
+			clientId, authorized := s.ensureSecured(conn)
+			if authorized {
+				s.handoffConnection(clientId, lbProxyApp, conn)
+			} else {
+				err := conn.Close()
+				if err != nil {
+					log.Println("APP", app.AppId, "Failed to close denied client connection", conn, "ERROR", err)
+				}
+			}
 		}
 	}
+}
+
+func (s *ProxyServer) ensureSecured(conn *net.TCPConn) (string, bool) {
+	app := s.config.App
+	clientId, err := s.config.Authn.AuthenticateConnection(conn)
+	if err != nil {
+		log.Println("APP", app.AppId, "Failed to authenticate client connection", conn, "ERROR:", err)
+		return clientId, false
+	}
+
+	authorized, err := s.config.Authz.AuthorizeClient(clientId, app.AppId)
+	if err != nil {
+		log.Println("APP", app.AppId, "Failed to authorize clientId", clientId, "ERROR:", err)
+		return clientId, false
+	}
+
+	// Extra logging for clarity
+	if !authorized {
+		log.Println("APP", app.AppId, "Access denied to clientId", clientId)
+	}
+	return clientId, authorized
+
 }
 
 func (s *ProxyServer) handoffConnection(clientId string, lbProxyApp lbproxy.Application, conn *net.TCPConn) {
