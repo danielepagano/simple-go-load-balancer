@@ -37,6 +37,12 @@ func GetStaticConfig() *ServerConfig {
 			MaxRateAmount:        5,
 			MaxRatePeriodSeconds: 10,
 		},
+		SecurityConfig: ServerSecurityConfig{
+			EnableMutualTLS: false,
+			CACommonName:    "localhost",
+			CertFilePath:    "",
+			KeyFilePath:     "",
+		},
 	}
 }
 
@@ -51,6 +57,14 @@ type ServerConfig struct {
 	Apps                   []AppConfig
 	Clients                map[string][]string
 	DefaultRateLimitConfig lbproxy.RateLimitManagerConfig
+	SecurityConfig         ServerSecurityConfig
+}
+
+type ServerSecurityConfig struct {
+	EnableMutualTLS bool // Master switch that turns off security to simplify testing in this sample project
+	CACommonName    string
+	CertFilePath    string
+	KeyFilePath     string
 }
 
 type AppConfig struct {

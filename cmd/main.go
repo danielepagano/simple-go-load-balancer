@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/danielepagano/teleport-int-load-balancer/internal"
+	"github.com/danielepagano/teleport-int-load-balancer/internal/security"
 	"github.com/danielepagano/teleport-int-load-balancer/lib/lbproxy"
 	"log"
 	"os"
@@ -13,9 +14,20 @@ func main() {
 	// This would be the place to load config from params, env vars etc. without changing anything else
 	config := internal.GetStaticConfig()
 
-	authn := &internal.StaticAuthN{}
-	authz := &internal.SimpleAuthZ{
-		ClientPermissions: config.Clients,
+	var authn security.AuthenticationProvider
+	var authz security.AuthorizationProvider
+
+	if config.SecurityConfig.EnableMutualTLS {
+		authn = &security.StaticAuthN{
+			CertFilePath: config.SecurityConfig.CertFilePath,
+			KeyFilePath:  config.SecurityConfig.KeyFilePath,
+		}
+		authz = &security.SimpleAuthZ{
+			ClientPermissions: config.Clients,
+		}
+	} else {
+		authn = &security.PlainTextAuth{}
+		authz = &security.NoOpAuthZ{}
 	}
 
 	for _, app := range config.Apps {
@@ -33,7 +45,7 @@ func main() {
 }
 
 func startAppServer(app internal.AppConfig, rateLimitConfig lbproxy.RateLimitManagerConfig,
-	authn internal.AuthenticationProvider, authz internal.AuthorizationProvider) {
+	authn security.AuthenticationProvider, authz security.AuthorizationProvider) {
 	serverConfig := internal.ProxyServerConfig{
 		App:             app,
 		RateLimitConfig: rateLimitConfig,
