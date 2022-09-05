@@ -1,6 +1,9 @@
 package internal
 
-import "github.com/danielepagano/teleport-int-load-balancer/lib/lbproxy"
+import (
+	"github.com/danielepagano/teleport-int-load-balancer/internal/security"
+	"github.com/danielepagano/teleport-int-load-balancer/lib/lbproxy"
+)
 
 // GetStaticConfig is a placeholder source for configuration
 func GetStaticConfig() *ServerConfig {
@@ -37,11 +40,14 @@ func GetStaticConfig() *ServerConfig {
 			MaxRateAmount:        5,
 			MaxRatePeriodSeconds: 10,
 		},
-		SecurityConfig: ServerSecurityConfig{
-			EnableMutualTLS: false,
-			CACommonName:    "localhost",
-			CertFilePath:    "",
-			KeyFilePath:     "",
+		SecurityConfig: security.ServerSecurityConfig{
+			EnableMutualTLS: true,
+			CertPath:        "certs",
+			ClientsCertPath: "certs/clients",
+			CertFileExt:     ".crt",
+			CertKeyExt:      ".key",
+			CaCertName:      "ca",
+			ServerCertName:  "server",
 		},
 	}
 }
@@ -57,14 +63,7 @@ type ServerConfig struct {
 	Apps                   []AppConfig
 	Clients                map[string][]string
 	DefaultRateLimitConfig lbproxy.RateLimitManagerConfig
-	SecurityConfig         ServerSecurityConfig
-}
-
-type ServerSecurityConfig struct {
-	EnableMutualTLS bool // Master switch that turns off security to simplify testing in this sample project
-	CACommonName    string
-	CertFilePath    string
-	KeyFilePath     string
+	SecurityConfig         security.ServerSecurityConfig
 }
 
 type AppConfig struct {

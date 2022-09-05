@@ -6,14 +6,14 @@ import (
 	"net"
 )
 
-type PlainTextAuth struct {
+type plainTextAuth struct {
 }
 
-func (a *PlainTextAuth) AuthenticateConnection(conn net.Conn) (string, error) {
+func (a *plainTextAuth) AuthenticateConnection(conn net.Conn) (string, error) {
 	return "localhost", nil
 }
 
-func (a *PlainTextAuth) StartListener(address string) (net.Listener, error) {
+func (a *plainTextAuth) StartListener(address string) (net.Listener, error) {
 	tcpAddress, err := net.ResolveTCPAddr(lbproxy.Protocol, address)
 	if err != nil {
 		return nil, fmt.Errorf("could resolve local TCP address for listening on "+address, err)
@@ -21,9 +21,9 @@ func (a *PlainTextAuth) StartListener(address string) (net.Listener, error) {
 	return net.ListenTCP(lbproxy.Protocol, tcpAddress)
 }
 
-type NoOpAuthZ struct {
+type noOpAuthZ struct {
 }
 
-func (a *NoOpAuthZ) AuthorizeClient(clientId string, appId string) (bool, error) {
+func (a *noOpAuthZ) AuthorizeClient(clientId string, appId string) (bool, error) {
 	return true, nil
 }

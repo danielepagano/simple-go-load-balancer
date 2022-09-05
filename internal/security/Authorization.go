@@ -9,11 +9,18 @@ type AuthorizationProvider interface {
 	AuthorizeClient(clientId string, appId string) (bool, error)
 }
 
-type SimpleAuthZ struct {
+func NewAuthorizationProvider(config ServerSecurityConfig, permissions map[string][]string) AuthorizationProvider {
+	if config.EnableMutualTLS {
+		return &simpleAuthZ{ClientPermissions: permissions}
+	}
+	return &noOpAuthZ{}
+}
+
+type simpleAuthZ struct {
 	ClientPermissions map[string][]string
 }
 
-func (a *SimpleAuthZ) AuthorizeClient(clientId string, appId string) (bool, error) {
+func (a *simpleAuthZ) AuthorizeClient(clientId string, appId string) (bool, error) {
 	// Let's normalize client ids to lowercase, since they are not case-sensitive
 	// This is to match with https://www.rfc-editor.org/rfc/rfc5280#section-4.2.1.6
 	// since we get client ids from X509 certificates

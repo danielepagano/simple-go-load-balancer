@@ -56,7 +56,7 @@ func (s *ProxyServer) Start() error {
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			log.Println("APP", s.App.AppId, "Failed to accept client connection", conn, "ERROR:", err)
+			log.Println("APP", s.App.AppId, "Failed to accept client connection from", conn.RemoteAddr(), "ERROR:", err)
 			// If connection was closed, it means listener was closed; exit the application server
 			// otherwise, we try and can accept future connections
 			if errors.Is(err, net.ErrClosed) {
@@ -69,7 +69,7 @@ func (s *ProxyServer) Start() error {
 			} else {
 				err := conn.Close()
 				if err != nil {
-					log.Println("APP", s.App.AppId, "Failed to close denied client connection", conn, "ERROR", err)
+					log.Println("APP", s.App.AppId, "Failed to close denied client connection from", conn.RemoteAddr(), "ERROR", err)
 				}
 			}
 		}
@@ -80,7 +80,7 @@ func (s *ProxyServer) ensureSecured(conn net.Conn) (string, bool) {
 	app := s.App
 	clientId, err := s.Authn.AuthenticateConnection(conn)
 	if err != nil {
-		log.Println("APP", app.AppId, "Failed to authenticate client connection", conn, "ERROR:", err)
+		log.Println("APP", app.AppId, "Failed to authenticate client connection from", conn.RemoteAddr(), "ERROR:", err)
 		return clientId, false
 	}
 

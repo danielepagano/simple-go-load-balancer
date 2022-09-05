@@ -14,21 +14,12 @@ func main() {
 	// This would be the place to load config from params, env vars etc. without changing anything else
 	config := internal.GetStaticConfig()
 
-	var authn security.AuthenticationProvider
-	var authz security.AuthorizationProvider
-
-	if config.SecurityConfig.EnableMutualTLS {
-		authn = &security.StaticAuthN{
-			CertFilePath: config.SecurityConfig.CertFilePath,
-			KeyFilePath:  config.SecurityConfig.KeyFilePath,
-		}
-		authz = &security.SimpleAuthZ{
-			ClientPermissions: config.Clients,
-		}
-	} else {
-		authn = &security.PlainTextAuth{}
-		authz = &security.NoOpAuthZ{}
+	authn, err := security.NewMTLSAuthenticationProvider(config.SecurityConfig)
+	if err != nil {
+		// Ok to panic if security was requested, but could not be configured, as we can't do anything
+		log.Panicln("PANIC: error configuring security", err)
 	}
+	authz := security.NewAuthorizationProvider(config.SecurityConfig, config.Clients)
 
 	for _, app := range config.Apps {
 		// Async start each app; server will not panic if some apps fail to start (usually port busy)
