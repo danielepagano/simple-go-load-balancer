@@ -95,7 +95,6 @@ func (s *ProxyServer) ensureSecured(conn net.Conn) (string, bool) {
 		log.Println("APP", app.AppId, "Access denied to clientId", clientId)
 	}
 	return clientId, authorized
-
 }
 
 func (s *ProxyServer) handoffConnection(clientId string, lbProxyApp lbproxy.Application, conn net.Conn) {
