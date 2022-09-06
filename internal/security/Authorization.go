@@ -9,7 +9,7 @@ type AuthorizationProvider interface {
 	AuthorizeClient(clientId string, appId string) (bool, error)
 }
 
-func NewAuthorizationProvider(config ServerSecurityConfig, permissions map[string][]string) AuthorizationProvider {
+func NewAuthorizationProvider(config ServerSecurityConfig, permissions map[string]map[string]struct{}) AuthorizationProvider {
 	if config.EnableMutualTLS {
 		return &simpleAuthZ{ClientPermissions: permissions}
 	}
@@ -17,7 +17,7 @@ func NewAuthorizationProvider(config ServerSecurityConfig, permissions map[strin
 }
 
 type simpleAuthZ struct {
-	ClientPermissions map[string][]string
+	ClientPermissions map[string]map[string]struct{}
 }
 
 func (a *simpleAuthZ) AuthorizeClient(clientId string, appId string) (bool, error) {
@@ -30,16 +30,6 @@ func (a *simpleAuthZ) AuthorizeClient(clientId string, appId string) (bool, erro
 		// expect all incoming clients to be configured (or for better logging)
 		return false, fmt.Errorf("client not configured: %s", clientId)
 	}
-	return contains(allowedApps, appId), nil
-}
-
-// Apps are not guaranteed to be sorted, so perform a linear search
-func contains(apps []string, id string) bool {
-	for _, a := range apps {
-		// Let's make app ids also not case-sensitive, since the client ids are not
-		if strings.EqualFold(a, id) {
-			return true
-		}
-	}
-	return false
+	_, allowed := allowedApps[strings.ToLower(appId)]
+	return allowed, nil
 }

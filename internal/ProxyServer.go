@@ -63,38 +63,39 @@ func (s *ProxyServer) Start() error {
 				return err
 			}
 		} else {
-			clientId, authorized := s.ensureSecured(conn)
-			if authorized {
-				s.handoffConnection(clientId, lbProxyApp, conn)
-			} else {
+			clientId, err := s.ensureSecured(conn)
+			if err != nil {
+				if err != nil {
+					log.Println("APP", s.App.AppId, "Could not authorize client connection", "ERROR", err)
+				}
 				err := conn.Close()
 				if err != nil {
 					log.Println("APP", s.App.AppId, "Failed to close denied client connection from", conn.RemoteAddr(), "ERROR", err)
 				}
+			} else {
+				s.handoffConnection(clientId, lbProxyApp, conn)
 			}
 		}
 	}
 }
 
-func (s *ProxyServer) ensureSecured(conn net.Conn) (string, bool) {
+func (s *ProxyServer) ensureSecured(conn net.Conn) (string, error) {
 	app := s.App
 	clientId, err := s.Authn.AuthenticateConnection(conn)
 	if err != nil {
-		log.Println("APP", app.AppId, "Failed to authenticate client connection from", conn.RemoteAddr(), "ERROR:", err)
-		return clientId, false
+		return "", fmt.Errorf("failed to authenticate client connection from %v. %w", conn.RemoteAddr(), err)
 	}
 
 	authorized, err := s.Authz.AuthorizeClient(clientId, app.AppId)
 	if err != nil {
-		log.Println("APP", app.AppId, "Failed to authorize clientId", clientId, "ERROR:", err)
-		return clientId, false
+		return "", fmt.Errorf("failed to authorize clientId %v. %w", clientId, err)
 	}
 
 	// Extra logging for clarity
 	if !authorized {
-		log.Println("APP", app.AppId, "Access denied to clientId", clientId)
+		return "", fmt.Errorf("app access denied clientId %v", clientId)
 	}
-	return clientId, authorized
+	return clientId, nil
 }
 
 func (s *ProxyServer) handoffConnection(clientId string, lbProxyApp lbproxy.Application, conn net.Conn) {

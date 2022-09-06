@@ -37,7 +37,7 @@ type staticAuthN struct {
 func (a *staticAuthN) AuthenticateConnection(conn net.Conn) (string, error) {
 	tlsConn, ok := conn.(*tls.Conn)
 	if !ok {
-		return "", error.New("connection was not TLS")
+		return "", fmt.Errorf("connection was not TLS")
 	}
 
 	// Perform handshake as we may have not sent or received data yet
@@ -75,10 +75,6 @@ func loadTLSConfig(config ServerSecurityConfig) (*tls.Config, error) {
 	serverKey := filepath.Join(config.CertPath, config.ServerCertName+config.CertKeyExt)
 	serverCert, err := tls.LoadX509KeyPair(serverCrt, serverKey)
 	if err != nil {
-		return nil, err
-	}
-	if err != nil {
-		log.Println("Failed to load server TLS config", "ERROR:", err)
 		return nil, err
 	}
 
