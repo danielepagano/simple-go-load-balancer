@@ -28,7 +28,7 @@ func (a *simpleAuthZ) AuthorizeClient(clientId string, appId string) (bool, erro
 	if !found {
 		// Client could use false as normal not found, or raise an issue if we
 		// expect all incoming clients to be configured (or for better logging)
-		return false, fmt.Errorf("client not configured:" + clientId)
+		return false, fmt.Errorf("client not configured: %s", clientId)
 	}
 	return contains(allowedApps, appId), nil
 }

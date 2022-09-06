@@ -37,7 +37,7 @@ type staticAuthN struct {
 func (a *staticAuthN) AuthenticateConnection(conn net.Conn) (string, error) {
 	tlsConn, ok := conn.(*tls.Conn)
 	if !ok {
-		return "", fmt.Errorf("connetion was not TLS")
+		return "", error.New("connection was not TLS")
 	}
 
 	// Perform handshake as we may have not sent or received data yet

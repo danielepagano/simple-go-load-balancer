@@ -16,7 +16,7 @@ func (a *plainTextAuth) AuthenticateConnection(conn net.Conn) (string, error) {
 func (a *plainTextAuth) StartListener(address string) (net.Listener, error) {
 	tcpAddress, err := net.ResolveTCPAddr(lbproxy.Protocol, address)
 	if err != nil {
-		return nil, fmt.Errorf("could resolve local TCP address for listening on "+address, err)
+		return nil, fmt.Errorf("could resolve local TCP address for listening on %s %w", address, err)
 	}
 	return net.ListenTCP(lbproxy.Protocol, tcpAddress)
 }
