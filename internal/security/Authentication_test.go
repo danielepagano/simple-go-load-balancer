@@ -100,8 +100,10 @@ func loadClientTLSConfig(t *testing.T, clientId string) *tls.Config {
 	}
 
 	return &tls.Config{
-		RootCAs:      caCertPool,
-		Certificates: []tls.Certificate{clientCert},
+		RootCAs: caCertPool,
+		GetClientCertificate: func(info *tls.CertificateRequestInfo) (*tls.Certificate, error) {
+			return &clientCert, nil
+		},
 	}
 }
 
