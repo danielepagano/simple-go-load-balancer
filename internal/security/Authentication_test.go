@@ -3,6 +3,7 @@ package security
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"github.com/danielepagano/teleport-int-load-balancer/lib/lbproxy"
 	"io"
 	"net"
 	"os"
@@ -14,13 +15,12 @@ import (
 // Warning: these certs will expire after Sept 2022
 // In non-sample app, we would be generating these certs directly in the test
 var config = ServerSecurityConfig{
-	EnableMutualTLS: true,
-	CertPath:        "../../certs",
-	ClientsCertPath: "../../certs/clients",
-	CertFileExt:     ".crt",
-	CertKeyExt:      ".key",
-	CaCertName:      "ca",
-	ServerCertName:  "server",
+	ClientsCertPath:   "../../certs/clients",
+	ClientCertFileExt: ".crt",
+	ClientCertKeyExt:  ".key",
+	CaCert:            "../../certs/ca.crt",
+	ServerCert:        "../../certs/server.crt",
+	ServerKey:         "../../certs/server.key",
 }
 
 const clientId = "localhost"
@@ -77,7 +77,7 @@ func TestMTLSAuthenticationProvider(t *testing.T) {
 func loadClientTLSConfig(t *testing.T, clientId string) *tls.Config {
 	t.Helper()
 	// Load CA certificate.
-	caCrt := filepath.Join(config.CertPath, config.CaCertName+config.CertFileExt)
+	caCrt := filepath.Join(config.CaCert)
 	caCert, err := os.ReadFile(caCrt)
 	if err != nil {
 		t.Fatalf("could not load CA cert = %v", err)
@@ -86,8 +86,8 @@ func loadClientTLSConfig(t *testing.T, clientId string) *tls.Config {
 	caCertPool.AppendCertsFromPEM(caCert)
 
 	// Load Client certificate
-	clientCrt := filepath.Join(config.ClientsCertPath, clientId, clientId+config.CertFileExt)
-	clientKey := filepath.Join(config.ClientsCertPath, clientId, clientId+config.CertKeyExt)
+	clientCrt := filepath.Join(config.ClientsCertPath, clientId, clientId+config.ClientCertFileExt)
+	clientKey := filepath.Join(config.ClientsCertPath, clientId, clientId+config.ClientCertKeyExt)
 	clientCert, err := tls.LoadX509KeyPair(clientCrt, clientKey)
 	if err != nil {
 		t.Fatalf("could not load client cert = %v", err)
@@ -101,14 +101,15 @@ func loadClientTLSConfig(t *testing.T, clientId string) *tls.Config {
 	}
 }
 
-func startTLSListener(t *testing.T) (AuthenticationProvider, net.Listener) {
+func startTLSListener(t *testing.T) (Authenticator, net.Listener) {
 	t.Helper()
-	auth, err := NewMTLSAuthenticationProvider(config)
+	auth, err := NewAuthenticator(config)
 	if err != nil {
 		t.Fatalf("TestMTLSAuthenticationProvider() error = %v", err)
 	}
 
-	tlsListener, err := auth.StartListener(serverAddress)
+	tlsConfig := auth.GetCurrentTlsConfig()
+	tlsListener, err := tls.Listen(lbproxy.Protocol, serverAddress, tlsConfig)
 	if err != nil {
 		t.Fatalf("TestMTLSAuthenticationProvider() error = %v", err)
 	}

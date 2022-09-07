@@ -14,12 +14,12 @@ func main() {
 	// This would be the place to load config from params, env vars etc. without changing anything else
 	config := internal.GetStaticConfig()
 
-	authn, err := security.NewMTLSAuthenticationProvider(config.SecurityConfig)
+	authn, err := security.NewAuthenticator(config.SecurityConfig)
 	if err != nil {
 		// Ok to panic if security was requested, but could not be configured, as we can't do anything
 		log.Panicln("PANIC: error configuring security", err)
 	}
-	authz := security.NewAuthorizationProvider(config.SecurityConfig, config.Clients)
+	authz := security.NewAuthorizer(config.Clients)
 
 	for _, app := range config.Apps {
 		// Async start each app; server will not panic if some apps fail to start (usually port busy)
@@ -36,7 +36,7 @@ func main() {
 }
 
 func startAppServer(app internal.AppConfig, rateLimitConfig lbproxy.RateLimitManagerConfig,
-	authn security.AuthenticationProvider, authz security.AuthorizationProvider) {
+	authn security.Authenticator, authz security.Authorizer) {
 	serverConfig := internal.ProxyServerConfig{
 		App:             app,
 		RateLimitConfig: rateLimitConfig,

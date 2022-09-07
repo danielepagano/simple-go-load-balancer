@@ -1,12 +1,14 @@
 package internal
 
 import (
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"github.com/danielepagano/teleport-int-load-balancer/internal/security"
 	"github.com/danielepagano/teleport-int-load-balancer/lib/lbproxy"
 	"log"
 	"net"
+	"sync"
 )
 
 const localServerPrefix = ":"
@@ -14,13 +16,14 @@ const localServerPrefix = ":"
 type ProxyServerConfig struct {
 	App             AppConfig
 	RateLimitConfig lbproxy.RateLimitManagerConfig
-	Authn           security.AuthenticationProvider
-	Authz           security.AuthorizationProvider
+	Authn           security.Authenticator
+	Authz           security.Authorizer
 }
 
 type ProxyServer struct {
 	ProxyServerConfig
-	rateManagers map[string]lbproxy.RateLimitManager
+	rateManagersLock sync.RWMutex
+	rateManagers     map[string]lbproxy.RateLimitManager
 }
 
 func NewProxyServer(config ProxyServerConfig) (*ProxyServer, error) {
@@ -63,19 +66,24 @@ func (s *ProxyServer) Start() error {
 				return err
 			}
 		} else {
-			clientId, err := s.ensureSecured(conn)
-			if err != nil {
-				if err != nil {
-					log.Println("APP", s.App.AppId, "Could not authorize client connection", "ERROR", err)
-				}
-				err := conn.Close()
-				if err != nil {
-					log.Println("APP", s.App.AppId, "Failed to close denied client connection from", conn.RemoteAddr(), "ERROR", err)
-				}
-			} else {
-				s.handoffConnection(clientId, lbProxyApp, conn)
-			}
+			go s.authorizeAndHandoffConnection(lbProxyApp, conn)
 		}
+	}
+}
+
+func (s *ProxyServer) authorizeAndHandoffConnection(lbProxyApp lbproxy.Application, conn net.Conn) {
+	clientId, err := s.ensureSecured(conn)
+	if err != nil {
+		if err != nil {
+			log.Println("APP", s.App.AppId, "Could not authorize client connection", "ERROR", err)
+		}
+		err := conn.Close()
+		if err != nil {
+			log.Println("APP", s.App.AppId, "Failed to close denied client connection from", conn.RemoteAddr(), "ERROR", err)
+		}
+	} else {
+		rlm := s.getRateLimitManager(clientId)
+		go lbProxyApp.SubmitConnection(conn, rlm)
 	}
 }
 
@@ -86,37 +94,27 @@ func (s *ProxyServer) ensureSecured(conn net.Conn) (string, error) {
 		return "", fmt.Errorf("failed to authenticate client connection from %v. %w", conn.RemoteAddr(), err)
 	}
 
-	authorized, err := s.Authz.AuthorizeClient(clientId, app.AppId)
-	if err != nil {
-		return "", fmt.Errorf("failed to authorize clientId %v. %w", clientId, err)
-	}
-
-	// Extra logging for clarity
-	if !authorized {
-		return "", fmt.Errorf("app access denied clientId %v", clientId)
-	}
-	return clientId, nil
+	err = s.Authz.AuthorizeClient(clientId, app.AppId)
+	return clientId, err
 }
 
-func (s *ProxyServer) handoffConnection(clientId string, lbProxyApp lbproxy.Application, conn net.Conn) {
+func (s *ProxyServer) getRateLimitManager(clientId string) lbproxy.RateLimitManager {
 	// Creates one rate-limit manager per (app,clientId)
-	// If we wanted to track rate limits across app for each client, we would create a thread-safe
-	// wrapper around a map that would be injected by the caller, so method app would do something like
-	// rlmStore.getRateLimitManager(clientId), which would get or create the instance for this client
+	s.rateManagersLock.Lock()
+	defer s.rateManagersLock.Unlock()
 	var rlm lbproxy.RateLimitManager
 	var found bool
 	if rlm, found = s.rateManagers[clientId]; !found {
 		rlm = lbproxy.CreateRateLimitManager(clientId+"@"+s.App.AppId, s.RateLimitConfig)
 		s.rateManagers[clientId] = rlm
 	}
-
-	// Hand off the connection to lbproxy and prepare to receive a new one
-	go lbProxyApp.SubmitConnection(conn, rlm)
+	return rlm
 }
 
 func (s *ProxyServer) startListener() (net.Listener, error) {
 	address := localServerPrefix + s.App.ProxyPort
-	listener, err := s.Authn.StartListener(address)
+	tlsConfig := s.Authn.GetCurrentTlsConfig()
+	listener, err := tls.Listen(lbproxy.Protocol, address, tlsConfig)
 	if err != nil {
 		log.Println("APP", s.App.AppId, "Failed to listen for tcp connections on", address, "ERROR:", err)
 		return nil, err

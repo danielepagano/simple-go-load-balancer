@@ -4,7 +4,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"github.com/danielepagano/teleport-int-load-balancer/lib/lbproxy"
 	"log"
 	"net"
 	"os"
@@ -12,21 +11,17 @@ import (
 	"strings"
 )
 
-type AuthenticationProvider interface {
+type Authenticator interface {
+	GetCurrentTlsConfig() *tls.Config
 	AuthenticateConnection(conn net.Conn) (string, error)
-	StartListener(address string) (net.Listener, error)
 }
 
-func NewMTLSAuthenticationProvider(config ServerSecurityConfig) (AuthenticationProvider, error) {
-	if config.EnableMutualTLS {
-		tlsConfig, err := loadTLSConfig(config)
-		if err != nil {
-			return nil, err
-		}
-		return &staticAuthN{config, tlsConfig}, nil
+func NewAuthenticator(config ServerSecurityConfig) (Authenticator, error) {
+	tlsConfig, err := loadTLSConfig(config)
+	if err != nil {
+		return nil, err
 	}
-
-	return &plainTextAuth{}, nil
+	return &staticAuthN{config, tlsConfig}, nil
 }
 
 type staticAuthN struct {
@@ -42,11 +37,9 @@ func (a *staticAuthN) AuthenticateConnection(conn net.Conn) (string, error) {
 
 	// Perform handshake as we may have not sent or received data yet
 	// In a production server we would use a context to enforce a handshake timeout
-	if !tlsConn.ConnectionState().HandshakeComplete {
-		err := tlsConn.Handshake()
-		if err != nil {
-			return "", err // Handled by caller
-		}
+	err := tlsConn.Handshake()
+	if err != nil {
+		return "", err // Handled by caller
 	}
 
 	state := tlsConn.ConnectionState()
@@ -56,23 +49,25 @@ func (a *staticAuthN) AuthenticateConnection(conn net.Conn) (string, error) {
 	return strings.ToLower(state.PeerCertificates[0].Subject.CommonName), nil
 }
 
-func (a *staticAuthN) StartListener(address string) (net.Listener, error) {
-	return tls.Listen(lbproxy.Protocol, address, a.tlsConfig)
+func (a *staticAuthN) GetCurrentTlsConfig() *tls.Config {
+	return a.tlsConfig
 }
 
 func loadTLSConfig(config ServerSecurityConfig) (*tls.Config, error) {
 	// Load CA certificate.
-	caCrt := filepath.Join(config.CertPath, config.CaCertName+config.CertFileExt)
+	caCrt := filepath.Join(config.CaCert)
 	caCert, err := os.ReadFile(caCrt)
 	if err != nil {
 		return nil, err
 	}
 	caCertPool := x509.NewCertPool()
-	caCertPool.AppendCertsFromPEM(caCert)
+	if ok := caCertPool.AppendCertsFromPEM(caCert); !ok {
+		return nil, fmt.Errorf("could not append CA certificate to pool")
+	}
 
 	// Load Server certificate
-	serverCrt := filepath.Join(config.CertPath, config.ServerCertName+config.CertFileExt)
-	serverKey := filepath.Join(config.CertPath, config.ServerCertName+config.CertKeyExt)
+	serverCrt := filepath.Join(config.ServerCert)
+	serverKey := filepath.Join(config.ServerKey)
 	serverCert, err := tls.LoadX509KeyPair(serverCrt, serverKey)
 	if err != nil {
 		return nil, err
@@ -86,13 +81,15 @@ func loadTLSConfig(config ServerSecurityConfig) (*tls.Config, error) {
 	clientCertPool := x509.NewCertPool()
 	for _, e := range entries {
 		if e.IsDir() {
-			clientCertPath := filepath.Join(config.ClientsCertPath, e.Name(), e.Name()+config.CertFileExt)
+			clientCertPath := filepath.Join(config.ClientsCertPath, e.Name(), e.Name()+config.ClientCertFileExt)
 			clientCert, err := os.ReadFile(clientCertPath)
 			if err != nil {
 				// In this case, we can just log and continue
 				log.Println("Could not load client cert for", e.Name(), "ERROR:", err)
 			} else {
-				clientCertPool.AppendCertsFromPEM(clientCert)
+				if ok := clientCertPool.AppendCertsFromPEM(clientCert); !ok {
+					log.Println("Could not append client cert for", e.Name(), "to pool.", "ERROR:", err)
+				}
 			}
 		}
 	}

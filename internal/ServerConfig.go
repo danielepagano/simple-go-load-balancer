@@ -30,7 +30,7 @@ func GetStaticConfig() *ServerConfig {
 				},
 			},
 		},
-		Clients: map[string]map[string]struct{}{
+		Clients: security.ClientPermissions{
 			"one.com":   {"httpbin": {}},
 			"two.com":   {"echo": {}},
 			"localhost": {"httpbin": {}, "echo": {}},
@@ -41,13 +41,12 @@ func GetStaticConfig() *ServerConfig {
 			MaxRatePeriodSeconds: 10,
 		},
 		SecurityConfig: security.ServerSecurityConfig{
-			EnableMutualTLS: true,
-			CertPath:        "certs",
-			ClientsCertPath: "certs/clients",
-			CertFileExt:     ".crt",
-			CertKeyExt:      ".key",
-			CaCertName:      "ca",
-			ServerCertName:  "server",
+			ClientsCertPath:   "certs/clients",
+			ClientCertFileExt: ".crt",
+			ClientCertKeyExt:  ".key",
+			CaCert:            "certs/ca.crt",
+			ServerCert:        "certs/server.crt",
+			ServerKey:         "certs/server.key",
 		},
 	}
 }
@@ -61,7 +60,7 @@ func (c *AppConfig) ToApplicationConfig() lbproxy.ApplicationConfig {
 
 type ServerConfig struct {
 	Apps                   []AppConfig
-	Clients                map[string]map[string]struct{} // Map from unique client ids to unique app ids allowed
+	Clients                security.ClientPermissions
 	DefaultRateLimitConfig lbproxy.RateLimitManagerConfig
 	SecurityConfig         security.ServerSecurityConfig
 }
