@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/danielepagano/teleport-int-load-balancer/internal"
+	"github.com/danielepagano/teleport-int-load-balancer/internal/security"
 	"github.com/danielepagano/teleport-int-load-balancer/lib/lbproxy"
 	"log"
 	"os"
@@ -13,10 +14,17 @@ func main() {
 	// This would be the place to load config from params, env vars etc. without changing anything else
 	config := internal.GetStaticConfig()
 
+	authn, err := security.NewAuthenticator(config.SecurityConfig)
+	if err != nil {
+		// Ok to panic if security was requested, but could not be configured, as we can't do anything
+		log.Panicln("PANIC: error configuring security", err)
+	}
+	authz := security.NewAuthorizer(config.Clients)
+
 	for _, app := range config.Apps {
 		// Async start each app; server will not panic if some apps fail to start (usually port busy)
 		// This would be a pretty loud alert in a real system
-		go startAppServer(app, config.DefaultRateLimitConfig)
+		go startAppServer(app, config.DefaultRateLimitConfig, authn, authz)
 	}
 
 	// Wait until Ctrl-C or equivalent
@@ -27,10 +35,13 @@ func main() {
 	log.Println("bye.")
 }
 
-func startAppServer(app internal.AppConfig, rateLimitConfig lbproxy.RateLimitManagerConfig) {
+func startAppServer(app internal.AppConfig, rateLimitConfig lbproxy.RateLimitManagerConfig,
+	authn security.Authenticator, authz security.Authorizer) {
 	serverConfig := internal.ProxyServerConfig{
 		App:             app,
 		RateLimitConfig: rateLimitConfig,
+		Authn:           authn,
+		Authz:           authz,
 	}
 
 	// Initialize and check configuration

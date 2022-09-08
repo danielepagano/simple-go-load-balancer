@@ -1,6 +1,9 @@
 package internal
 
-import "github.com/danielepagano/teleport-int-load-balancer/lib/lbproxy"
+import (
+	"github.com/danielepagano/teleport-int-load-balancer/internal/security"
+	"github.com/danielepagano/teleport-int-load-balancer/lib/lbproxy"
+)
 
 // GetStaticConfig is a placeholder source for configuration
 func GetStaticConfig() *ServerConfig {
@@ -27,24 +30,23 @@ func GetStaticConfig() *ServerConfig {
 				},
 			},
 		},
-		Clients: []ClientConfig{
-			{
-				ClientId:      "one.com",
-				AllowedAppIds: []string{"app1"},
-			},
-			{
-				ClientId:      "two.com",
-				AllowedAppIds: []string{"app2"},
-			},
-			{
-				ClientId:      "all.com",
-				AllowedAppIds: []string{"app1", "app2"},
-			},
+		Clients: security.ClientPermissions{
+			"one.com":   {"httpbin": {}},
+			"two.com":   {"echo": {}},
+			"localhost": {"httpbin": {}, "echo": {}},
 		},
 		DefaultRateLimitConfig: lbproxy.RateLimitManagerConfig{
 			MaxOpenConnections:   5,
 			MaxRateAmount:        5,
 			MaxRatePeriodSeconds: 10,
+		},
+		SecurityConfig: security.ServerSecurityConfig{
+			ClientsCertPath:   "certs/clients",
+			ClientCertFileExt: ".crt",
+			ClientCertKeyExt:  ".key",
+			CaCert:            "certs/ca.crt",
+			ServerCert:        "certs/server.crt",
+			ServerKey:         "certs/server.key",
 		},
 	}
 }
@@ -58,17 +60,13 @@ func (c *AppConfig) ToApplicationConfig() lbproxy.ApplicationConfig {
 
 type ServerConfig struct {
 	Apps                   []AppConfig
-	Clients                []ClientConfig
+	Clients                security.ClientPermissions
 	DefaultRateLimitConfig lbproxy.RateLimitManagerConfig
+	SecurityConfig         security.ServerSecurityConfig
 }
 
 type AppConfig struct {
 	AppId     string
 	ProxyPort string
 	Upstreams []lbproxy.UpstreamServer
-}
-
-type ClientConfig struct {
-	ClientId      string
-	AllowedAppIds []string
 }
