@@ -3,14 +3,11 @@ author: Daniele Pagano (daniele@danielepagano.com)
 state: draft
 ---
 
-# RFD - Basic TCP Load Balancer (Teleport Challenge)
+# RFD - Basic TCP Load Balancer
 
 ## What & Why
 
-Author is to implement a basic TCP Load Balancer (Level 4) by request of the Teleport Systems Team,
-as described [here](https://github.com/gravitational/careers/blob/main/challenges/systems/challenge-2.md#level-4).
-
-The system will be delivered as a reusable library and server (plus relevant tests) written in Go and fully contained within this repository.
+Basic TCP Load Balancer. The system will be delivered as a reusable library and server (plus relevant tests) written in Go and fully contained within this repository.
 
 ## Details
 
